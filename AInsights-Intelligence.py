@@ -43,16 +43,18 @@ load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
-api_key = os.getenv("GOOGLE_API_KEY")
+model_api_key = os.getenv("GOOGLE_API_KEY")
 
 google_project_id = "coil-398415"
 bigquery_dataset = "coil_claro_col"
 openai_model = "gpt-4o" # "o1-preview"
+google_model = "gemini-2.0-flash"
+selected_model = google_model
 temperature = 1  # 0
 
 # Validar variables de entorno necesarias
-if not api_key:
-    raise ValueError("GOOGLE_API_KEY not found in environment variables.")
+if not model_api_key:
+    raise ValueError("No se encontró la API key del modelo en las variables de entorno.")
 
 print("Entorno correctamenete configurado...")
 time.sleep(3)
@@ -131,7 +133,19 @@ def handle_tool_error(state) -> dict:
         ]
     }
 
-toolkit = SQLDatabaseToolkit(db=db, llm=ChatOpenAI(model=openai_model))
+# Instacia de LLM con Gooogle
+google_llm = ChatGoogleGenerativeAI(
+    model=google_model,
+    google_api_key=GOOGLE_API_KEY,
+    temperature=temperature,
+    convert_system_message_to_human=True # Ayuda con la compatibilidad de prompts
+)
+
+# Instacia de LLM con OpenAI
+openai_llm = ChatOpenAI(model=openai_model)
+
+selected_llm = google_llm
+toolkit = SQLDatabaseToolkit(db=db, llm=selected_llm)
 tools = toolkit.get_tools()
 # 1) list_tables_tool: Fetch the available tables from the database
 list_tables_tool = next(tool for tool in tools if tool.name == "sql_db_list_tables")
@@ -181,8 +195,8 @@ query_check_prompt = ChatPromptTemplate.from_messages(
      ("placeholder", "{messages}")]
 )
 
-query_check = query_check_prompt | ChatOpenAI(model=openai_model, temperature=temperature).bind_tools(
-    [db_query_tool], tool_choice="required"
+query_check = query_check_prompt | selected_llm.bind_tools( 
+    [db_query_tool], tool_choice="db_query_tool"
 )
 # print(query_check.invoke({"messages": [("user", "SELECT * FROM Artist LIMIT 10;")]}))
 # ---------------------------------°
@@ -227,7 +241,7 @@ workflow.add_node(
 workflow.add_node("get_schema_tool", create_tool_node_with_fallback([get_schema_tool]))
 
 # Add a node for a model to choose the relevant tables based on the question and available tables
-model_get_schema = ChatOpenAI(model=openai_model, temperature=temperature).bind_tools(
+model_get_schema = selected_llm.bind_tools(
     [get_schema_tool]
 )
 workflow.add_node(
@@ -267,7 +281,7 @@ query_gen_prompt = ChatPromptTemplate.from_messages(
      ("placeholder", "{messages}")]
 )
 
-query_gen = query_gen_prompt | ChatOpenAI(model=openai_model, temperature=temperature).bind_tools(
+query_gen = query_gen_prompt | selected_llm.bind_tools(
     [SubmitFinalAnswer] # SubmitFinalAnswer sigue siendo la herramienta para la respuesta final
 )
 
@@ -442,10 +456,10 @@ iface_chat = gr.ChatInterface(
     fn=agent_chat_response,
     chatbot=gr.Chatbot(height=400, type="messages"),
     textbox=gr.Textbox(placeholder="Pregúntame algo sobre la base de datos AInsights...", container=False, scale=7),
-    title="AInsights Intelligence🔮",
+    title="🔮AInsights Intelligence",
     description="Chatea con un agente que puede consultar la base de datos AInsights.",
     examples=[
-        "¿Cual es el motivo de contacto del caso 298652749 de la tabla salida_calor_col?"
+        "¿Cual es el motivo de contacto del caso 298652749 de la tabla salida_claro_col?"
     ]
 ) 
 # -----------------------------------------------°
