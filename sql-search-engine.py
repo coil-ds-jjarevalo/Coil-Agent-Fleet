@@ -2,14 +2,17 @@
 # --- Importaciones ---°
 # ---------------------°
 # General
-from dotenv import load_dotenv
 import os
+clear_command = 'cls' if os.name == 'nt' else 'clear'
+os.system(clear_command)
+from dotenv import load_dotenv
+import gradio as gr
 # import requests
 import time
 from typing import Any
 from typing import Annotated, Literal
 from typing_extensions import TypedDict
-from IPython.display import Image, display
+# from IPython.display import Image, display
 # LangChain & LangGraph
 from langchain_community.utilities import SQLDatabase
 from langchain_core.messages import ToolMessage
@@ -23,25 +26,22 @@ from langchain_core.messages import AIMessage
 from langchain_openai import ChatOpenAI
 from langgraph.graph import END, StateGraph, START
 from langgraph.graph.message import AnyMessage, add_messages
-from langchain_core.runnables.graph import MermaidDrawMethod
+# from langchain_core.runnables.graph import MermaidDrawMethod
+from langchain_core.messages import HumanMessage
 # Pydantic AI
 from pydantic import BaseModel, Field
 # Visualization
-import networkx as nx
-import matplotlib.pyplot as plt
+# import networkx as nx
+# import matplotlib.pyplot as plt
 # --------------------------°
 # --- Configurar entorno ---°
 # --------------------------°
-clear_windows = 'cls'
-clear_linux = 'clear'
-os.system(clear_windows)
-time.sleep(5)
 load_dotenv()
 api_key = os.getenv("OPENAI_API_KEY")
 # --------------------------------°
 # --- Configurar Base de Datos ---°
 # --------------------------------°
-"""
+""" Base Chinook de prueba
 url = "https://storage.googleapis.com/benchmarks-artifacts/chinook/Chinook.db"
 
 response = requests.get(url)
@@ -54,6 +54,7 @@ if response.status_code == 200:
     print("File downloaded and saved as Chinook.db")
 else:
     print(f"Failed to download the file. Status code: {response.status_code}")
+
 """
 db = SQLDatabase.from_uri("sqlite:///Chinook.db")
 print(f"Dialect: {db.dialect}")
@@ -61,6 +62,7 @@ time.sleep(3)
 print(f"Tables: {db.get_usable_table_names()}")
 time.sleep(3)
 # db.run("SELECT * FROM Artist LIMIT 10;")
+# Conexión a Big Query
 # ---------------------------------°
 # --- Definir funciones (tools) ---°
 # ---------------------------------°
@@ -303,9 +305,105 @@ plt.show()
 # ----------------------------------°
 # --- Correr el Agente -------------°
 # ----------------------------------°
-input_prompt = input("Enter a question: ")
-messages = app.invoke(
-    {"messages": [("user", input_prompt)]}
+"""
+def run_chatbot():
+    print("\n=== SQL Search Engine Chatbot ===")
+    print("Type 'exit' or 'quit' to end the conversation")
+    print("----------------------------------------")
+    
+    while True:
+        input_prompt = input("\nYou: ").strip()
+        
+        if input_prompt.lower() in ['exit', 'quit']:
+            print("\nGoodbye! Thanks for using SQL Search Engine Chatbot.")
+            break
+            
+        if not input_prompt:
+            print("Please enter a question.")
+            continue
+            
+        try:
+            messages = app.invoke(
+                {"messages": [("user", input_prompt)]}
+            )
+            final_answer = messages["messages"][-1].tool_calls[0]["args"]["final_answer"]
+            print("\nAssistant:", final_answer)
+        except Exception as e:
+            print(f"\nError: {str(e)}")
+            print("Please try asking your question in a different way.")
+
+time.sleep(5)
+os.system(clear_command)
+if __name__ == "__main__":
+    run_chatbot()
+"""
+# Interfaz con Gradio
+""" Code base de ejemplo para Gradio
+def greet(name, intensity):
+    return "Hello, " + name + "!" * int(intensity)
+
+demo = gr.Interface(
+    fn=greet,
+    inputs=["text", "slider"],
+    outputs=["text"],
 )
-json_str = messages["messages"][-1].tool_calls[0]["args"]["final_answer"]
-print(json_str)
+
+demo.launch()
+"""
+def agent_chat_response(message: str, history: list[list[str]]):
+    """
+    Función para el chatbot de Gradio. Mantiene el historial.
+    Nota: Este ejemplo simple invoca el agente *desde cero* con cada mensaje nuevo.
+          Para mantener el estado real de LangGraph entre turnos, se necesitaría
+          una gestión de estado más compleja (ej. almacenar/recuperar estados por sesión).
+    """
+    print(f"--- Chat Input: {message} ---")
+    print(f"--- History: {history} ---") # History es [[user_msg1, bot_msg1], [user_msg2, bot_msg2], ...]
+
+    try:
+        # Invocar el agente con el mensaje actual del usuario
+        config = {"recursion_limit": 50}
+        final_state = app.invoke(
+             {"messages": [HumanMessage(content=message)]},
+             config=config
+        )
+
+        # Extraer la respuesta final
+        final_answer = "No se pudo determinar la respuesta final."
+        last_message = final_state.get("messages", [])[-1]
+        if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+             for tc in last_message.tool_calls:
+                 if tc.get("name") == "SubmitFinalAnswer":
+                     final_answer = tc.get("args", {}).get("final_answer", final_answer)
+                     break
+
+        print(f"--- Chat Output: {final_answer} ---")
+        return final_answer
+
+    except Exception as e:
+        import traceback
+        print(f"\nError en Gradio invoke: {e}")
+        print(traceback.format_exc())
+        return f"Ocurrió un error: {str(e)}"
+
+# Crear la interfaz de Chatbot
+iface_chat = gr.ChatInterface(
+    fn=agent_chat_response,
+    chatbot=gr.Chatbot(height=400, type="messages"),
+    textbox=gr.Textbox(placeholder="Pregúntame algo sobre la base de datos Chinook...", container=False, scale=7),
+    title="💬 Chatbot SQL para Chinook",
+    description="Chatea con un agente que puede consultar la base de datos Chinook. Haz preguntas en lenguaje natural.",
+    examples=[
+        "¿Cuántos artistas hay en la base de datos?",
+        "¿Cuáles son los géneros musicales disponibles?",
+        "Lista los 5 clientes que más han gastado",
+    ]
+    # undo_btn="Borrar último",
+    # clear_btn="Limpiar chat"
+)
+# -----------------------------------------------°
+# --- Lanzar la interfaz de Gradio en consola ---°
+# -----------------------------------------------°
+if __name__ == "__main__":
+    print("Lanzando interfaz Gradio Chatbot...")
+    iface_chat.launch(share=False)
