@@ -13,21 +13,24 @@ from typing import Any
 from typing import Annotated, Literal
 from typing_extensions import TypedDict
 # from IPython.display import Image, display
-# LangChain & LangGraph
+# LangChain
 from langchain_community.utilities import SQLDatabase
 from langchain_core.messages import ToolMessage
 from langchain_core.runnables import RunnableLambda, RunnableWithFallbacks
 from langgraph.prebuilt import ToolNode
 from langchain_community.agent_toolkits import SQLDatabaseToolkit
-from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import AIMessage
-from langchain_openai import ChatOpenAI
-from langgraph.graph import END, StateGraph, START
-from langgraph.graph.message import AnyMessage, add_messages
 # from langchain_core.runnables.graph import MermaidDrawMethod
 from langchain_core.messages import HumanMessage
+# Langgraph
+from langgraph.graph import END, StateGraph, START
+from langgraph.graph.message import AnyMessage, add_messages
+# OpenAI
+from langchain_openai import ChatOpenAI
+# Google GenAI
+from langchain_google_genai import ChatGoogleGenerativeAI
 # Pydantic AI
 from pydantic import BaseModel, Field
 # Visualization
@@ -38,13 +41,18 @@ from pydantic import BaseModel, Field
 # --------------------------°
 load_dotenv()
 
-api_key = os.getenv("OPENAI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+api_key = os.getenv("GOOGLE_API_KEY")
+
 google_project_id = "coil-398415"
 bigquery_dataset = "coil_claro_col"
+openai_model = "gpt-4o" # "o1-preview"
+temperature = 1  # 0
 
 # Validar variables de entorno necesarias
 if not api_key:
-    raise ValueError("OPENAI_API_KEY not found in environment variables.")
+    raise ValueError("GOOGLE_API_KEY not found in environment variables.")
 
 print("Entorno correctamenete configurado...")
 time.sleep(3)
@@ -81,7 +89,7 @@ try:
 
     print("Fetching usable table names...")
     usable_tables = db.get_usable_table_names()
-    print(f"Usable tables: {usable_tables}")
+    print(f"Usable tables: {usable_tables}/n")
     # time.sleep(1) # Opcional
 
     # Opcional: Probar una consulta simple si quieres verificar la conexión
@@ -94,10 +102,8 @@ except Exception as e:
     print("Please check your GOOGLE_PROJECT_ID, BIGQUERY_DATASET, and authentication setup (Application Default Credentials or GOOGLE_APPLICATION_CREDENTIALS).")
     exit() # Salir si no se puede conectar
 
-print(f"Dialect: {db.dialect}")
-time.sleep(3)
-print(f"Tables: {db.get_usable_table_names()}")
-time.sleep(3)
+# time.sleep(5)
+# os.system(clear_command)
 # db.run("SELECT * FROM Artist LIMIT 10;")
 # Conexión a Big Query
 # ---------------------------------°
@@ -125,7 +131,7 @@ def handle_tool_error(state) -> dict:
         ]
     }
 
-toolkit = SQLDatabaseToolkit(db=db, llm=ChatOpenAI(model="gpt-4o"))
+toolkit = SQLDatabaseToolkit(db=db, llm=ChatOpenAI(model=openai_model))
 tools = toolkit.get_tools()
 # 1) list_tables_tool: Fetch the available tables from the database
 list_tables_tool = next(tool for tool in tools if tool.name == "sql_db_list_tables")
@@ -175,7 +181,7 @@ query_check_prompt = ChatPromptTemplate.from_messages(
      ("placeholder", "{messages}")]
 )
 
-query_check = query_check_prompt | ChatOpenAI(model="gpt-4o", temperature=0).bind_tools(
+query_check = query_check_prompt | ChatOpenAI(model=openai_model, temperature=temperature).bind_tools(
     [db_query_tool], tool_choice="required"
 )
 # print(query_check.invoke({"messages": [("user", "SELECT * FROM Artist LIMIT 10;")]}))
@@ -221,7 +227,7 @@ workflow.add_node(
 workflow.add_node("get_schema_tool", create_tool_node_with_fallback([get_schema_tool]))
 
 # Add a node for a model to choose the relevant tables based on the question and available tables
-model_get_schema = ChatOpenAI(model="gpt-4o", temperature=0).bind_tools(
+model_get_schema = ChatOpenAI(model=openai_model, temperature=temperature).bind_tools(
     [get_schema_tool]
 )
 workflow.add_node(
@@ -261,7 +267,7 @@ query_gen_prompt = ChatPromptTemplate.from_messages(
      ("placeholder", "{messages}")]
 )
 
-query_gen = query_gen_prompt | ChatOpenAI(model="gpt-4o", temperature=0).bind_tools(
+query_gen = query_gen_prompt | ChatOpenAI(model=openai_model, temperature=temperature).bind_tools(
     [SubmitFinalAnswer] # SubmitFinalAnswer sigue siendo la herramienta para la respuesta final
 )
 
@@ -435,20 +441,16 @@ def agent_chat_response(message: str, history: list[list[str]]):
 iface_chat = gr.ChatInterface(
     fn=agent_chat_response,
     chatbot=gr.Chatbot(height=400, type="messages"),
-    textbox=gr.Textbox(placeholder="Pregúnta algo sobre la base de datos AInsights...", container=False, scale=7),
-    title="💬 Chatbot SQL para AInsights",
+    textbox=gr.Textbox(placeholder="Pregúntame algo sobre la base de datos AInsights...", container=False, scale=7),
+    title="AInsights Intelligence🔮",
     description="Chatea con un agente que puede consultar la base de datos AInsights.",
     examples=[
-        "¿Cuántos clientes hay en la base de datos?",
-        "¿Cuántos productos hay en la base de datos?",
-        "¿Cuántos pedidos hay en la base de datos?",
+        "¿Cual es el motivo de contacto del caso 298652749 de la tabla salida_calor_col?"
     ]
-    # undo_btn="Borrar último",
-    # clear_btn="Limpiar chat"
-)
+) 
 # -----------------------------------------------°
 # --- Lanzar la interfaz de Gradio en consola ---°
 # -----------------------------------------------°
 if __name__ == "__main__":
-    print("Lanzando interfaz Gradio Chatbot...")
+    print("Lanzando interfaz AInsights Intelligence...")
     iface_chat.launch(share=False)
