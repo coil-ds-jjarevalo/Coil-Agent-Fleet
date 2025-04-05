@@ -390,13 +390,13 @@ def agent_chat_response(message: str, history: list[list[str]]):
 iface_chat = gr.ChatInterface(
     fn=agent_chat_response,
     chatbot=gr.Chatbot(height=400, type="messages"),
-    textbox=gr.Textbox(placeholder="Pregúntame algo sobre la base de datos Chinook...", container=False, scale=7),
-    title="💬 Chatbot SQL para Chinook",
-    description="Chatea con un agente que puede consultar la base de datos Chinook. Haz preguntas en lenguaje natural.",
+    textbox=gr.Textbox(placeholder="Pregúnta algo sobre la base de datos AInsights...", container=False, scale=7),
+    title="💬 Chatbot SQL para AInsights",
+    description="Chatea con un agente que puede consultar la base de datos AInsights.",
     examples=[
-        "¿Cuántos artistas hay en la base de datos?",
-        "¿Cuáles son los géneros musicales disponibles?",
-        "Lista los 5 clientes que más han gastado",
+        "¿Cuántos clientes hay en la base de datos?",
+        "¿Cuántos productos hay en la base de datos?",
+        "¿Cuántos pedidos hay en la base de datos?",
     ]
     # undo_btn="Borrar último",
     # clear_btn="Limpiar chat"
