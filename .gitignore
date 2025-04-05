@@ -174,3 +174,4 @@ cython_debug/
 .pypirc
 Chinook.db
 .gradio/flagged/dataset1.csv
+coil_bq.json
