@@ -1,56 +1,61 @@
+# Copyright 2025 Google LLC
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 # ---------------------°
 # --- Importaciones ---°
 # ---------------------°
+# mypy: disable-error-code="union-attr"
 # General
 import os
 clear_command = 'cls' if os.name == 'nt' else 'clear'
 os.system(clear_command)
-from dotenv import load_dotenv
-import gradio as gr
-# import requests
 import time
+from dotenv import load_dotenv
 from typing import Any
-from typing import Annotated, Literal
 from typing_extensions import TypedDict
-# from IPython.display import Image, display
-# LangChain
-from langchain_community.utilities import SQLDatabase
-from langchain_core.messages import ToolMessage
-from langchain_core.runnables import RunnableLambda, RunnableWithFallbacks
-from langgraph.prebuilt import ToolNode
-from langchain_community.agent_toolkits import SQLDatabaseToolkit
+from typing import Annotated, Literal
+# Langchain
+from langchain_core.messages import BaseMessage
+from langchain_core.runnables import RunnableConfig
 from langchain_core.tools import tool
+from langchain_google_vertexai import ChatVertexAI
+from langchain_community.agent_toolkits import SQLDatabaseToolkit
+from langchain_community.utilities import SQLDatabase
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.messages import ToolMessage
+from langchain_core.runnables import RunnableWithFallbacks, RunnableLambda
 from langchain_core.messages import AIMessage
-# from langchain_core.runnables.graph import MermaidDrawMethod
-from langchain_core.messages import HumanMessage
 # Langgraph
-from langgraph.graph import END, StateGraph, START
-from langgraph.graph.message import AnyMessage, add_messages
-# OpenAI
-# from langchain_openai import ChatOpenAI
-# Google GenAI
-from langchain_google_genai import ChatGoogleGenerativeAI
+from langgraph.graph import END, MessagesState, StateGraph, START
+from langgraph.prebuilt import ToolNode
+from langgraph.graph import AnyMessage, add_messages
 # Pydantic AI
 from pydantic import BaseModel, Field
-# Visualization
-# import networkx as nx
-# import matplotlib.pyplot as plt
 # --------------------------°
 # --- Configurar entorno ---°
 # --------------------------°
 load_dotenv()
 
-OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 model_api_key = os.getenv("GOOGLE_API_KEY")
 
-google_project_id = "coil-398415"
-bigquery_dataset = "coil_claro_col"
-openai_model = "gpt-4o" # "o1-preview"
-google_model = "gemini-2.0-flash"
+LOCATION = "us-central1"
+google_model = "gemini-2.0-flash-001"
 selected_model = google_model
 temperature = 1  # 0
+
+google_project_id = "coil-398415"
+bigquery_dataset = "coil_claro_col"
 
 # Validar variables de entorno necesarias
 if not model_api_key:
@@ -112,49 +117,24 @@ except Exception as e:
 # ---------------------------------°
 # --- Definir funciones (tools) ---°
 # ---------------------------------°
-# Wrap a ToolNode with a fallback to handle errors and surface them to the agent
-def create_tool_node_with_fallback(tools: list) -> RunnableWithFallbacks[Any, dict]:
-    """
-    Create a ToolNode with a fallback to handle errors and surface them to the agent.
-    """
-    return ToolNode(tools).with_fallbacks(
-        [RunnableLambda(handle_tool_error)], exception_key="error"
-    )
-
-def handle_tool_error(state) -> dict:
-    error = state.get("error")
-    tool_calls = state["messages"][-1].tool_calls
-    return {
-        "messages": [
-            ToolMessage(
-                content=f"Error: {repr(error)}\n please fix your mistakes.",
-                tool_call_id=tc["id"],
-            )
-            for tc in tool_calls
-        ]
-    }
-
-# Instacia de LLM con Gooogle
-google_llm = ChatGoogleGenerativeAI(
-    model=google_model,
-    google_api_key=GOOGLE_API_KEY,
-    temperature=temperature,
-    convert_system_message_to_human=True # Ayuda con la compatibilidad de prompts
-)
-
-# Instacia de LLM con OpenAI
-# openai_llm = ChatOpenAI(model=openai_model)
-
-selected_llm = google_llm
-toolkit = SQLDatabaseToolkit(db=db, llm=selected_llm)
+toolkit = SQLDatabaseToolkit(db=db, llm=selected_model)
 tools = toolkit.get_tools()
 # 1) list_tables_tool: Fetch the available tables from the database
 list_tables_tool = next(tool for tool in tools if tool.name == "sql_db_list_tables")
 # 2) get_schema_tool: Fetch the DDL for a table
 get_schema_tool = next(tool for tool in tools if tool.name == "sql_db_schema")
-# print(list_tables_tool.invoke(""))
-# print(get_schema_tool.invoke("Artist"))
-# 3)db_query_tool: Execute the query and fetch the results OR return an error message if the query fails
+
+""" Ejemplo original
+@tool
+def search(query: str) -> str:
+    Simulates a web search. Use it get information on weather
+    if "sf" in query.lower() or "san francisco" in query.lower():
+        return "It's 60 degrees and foggy."
+    return "It's 90 degrees and sunny."
+
+tools = [search]
+"""
+
 @tool
 def db_query_tool(query: str) -> str:
     """
@@ -196,13 +176,71 @@ query_check_prompt = ChatPromptTemplate.from_messages(
      ("placeholder", "{messages}")]
 )
 
-query_check = query_check_prompt | selected_llm.bind_tools( 
+query_check = query_check_prompt | selected_model.bind_tools( 
     [db_query_tool], tool_choice="db_query_tool"
 )
-# print(query_check.invoke({"messages": [("user", "SELECT * FROM Artist LIMIT 10;")]}))
+
+tools = [list_tables_tool, get_schema_tool, db_query_tool]
+
+# Wrap a ToolNode with a fallback to handle errors and surface them to the agent
+def create_tool_node_with_fallback(tools: list) -> RunnableWithFallbacks[Any, dict]:
+    """
+    Create a ToolNode with a fallback to handle errors and surface them to the agent.
+    """
+    return ToolNode(tools).with_fallbacks(
+        [RunnableLambda(handle_tool_error)], exception_key="error"
+    )
+
+def handle_tool_error(state) -> dict:
+    error = state.get("error")
+    tool_calls = state["messages"][-1].tool_calls
+    return {
+        "messages": [
+            ToolMessage(
+                content=f"Error: {repr(error)}\n please fix your mistakes.",
+                tool_call_id=tc["id"],
+            )
+            for tc in tool_calls
+        ]
+    }
 # ---------------------------------°
 # --- Definir el workflow ---------°
 # ---------------------------------°
+# Set up the language model
+llm = ChatVertexAI(
+    model=selected_model, location=LOCATION, temperature=0, max_tokens=1024, streaming=True
+).bind_tools(tools)
+
+def should_continue(state: MessagesState) -> str:
+    """Determines whether to use tools or end the conversation."""
+    last_message = state["messages"][-1]
+    return "tools" if last_message.tool_calls else END
+
+
+def call_model(state: MessagesState, config: RunnableConfig) -> dict[str, BaseMessage]:
+    """Calls the language model and returns the response."""
+    system_message = "You are a helpful AI assistant."
+    messages_with_system = [{"type": "system", "content": system_message}] + state[
+        "messages"
+    ]
+    # Forward the RunnableConfig object to ensure the agent is capable of streaming the response.
+    response = llm.invoke(messages_with_system, config)
+    return {"messages": response}
+
+""" Ejemplo original
+# 4. Create the workflow graph
+workflow = StateGraph(MessagesState)
+workflow.add_node("agent", call_model)
+workflow.add_node("tools", ToolNode(tools))
+workflow.set_entry_point("agent")
+
+# 5. Define graph edges
+workflow.add_conditional_edges("agent", should_continue)
+workflow.add_edge("tools", "agent")
+
+# 6. Compile the workflow
+agent = workflow.compile()
+"""
 # Define the state for the agent
 class State(TypedDict):
     messages: Annotated[list[AnyMessage], add_messages]
@@ -242,7 +280,7 @@ workflow.add_node(
 workflow.add_node("get_schema_tool", create_tool_node_with_fallback([get_schema_tool]))
 
 # Add a node for a model to choose the relevant tables based on the question and available tables
-model_get_schema = selected_llm.bind_tools(
+model_get_schema = selected_model.bind_tools(
     [get_schema_tool]
 )
 workflow.add_node(
@@ -282,7 +320,7 @@ query_gen_prompt = ChatPromptTemplate.from_messages(
      ("placeholder", "{messages}")]
 )
 
-query_gen = query_gen_prompt | selected_llm.bind_tools(
+query_gen = query_gen_prompt | selected_model.bind_tools(
     [SubmitFinalAnswer] # SubmitFinalAnswer sigue siendo la herramienta para la respuesta final
 )
 
@@ -342,130 +380,3 @@ workflow.add_edge("execute_query", "query_gen")
 
 # Compile the workflow into a runnable
 app = workflow.compile()
-# ----------------------------------°
-# --- Visualizar grafo de agente ---°
-# ----------------------------------°
-"""
-# Get the graph from LangGraph
-graph = app.get_graph()
-
-# Create a new directed graph
-G = nx.DiGraph()
-
-# Add nodes and edges from the graph
-for node in graph.nodes:
-    G.add_node(node)
-    for edge in graph.edges:
-        if edge[0] == node:
-            G.add_edge(edge[0], edge[1])
-
-# Draw the graph
-plt.figure(figsize=(12, 8))
-pos = nx.spring_layout(G)
-nx.draw(G, pos, with_labels=True, node_color='lightblue', 
-        node_size=2000, font_size=10, font_weight='bold',
-        arrows=True, edge_color='gray')
-plt.title("SQL Search Engine Graph")
-plt.show()
-"""
-# ----------------------------------°
-# --- Correr el Agente -------------°
-# ----------------------------------°
-"""
-def run_chatbot():
-    print("\n=== SQL Search Engine Chatbot ===")
-    print("Type 'exit' or 'quit' to end the conversation")
-    print("----------------------------------------")
-    
-    while True:
-        input_prompt = input("\nYou: ").strip()
-        
-        if input_prompt.lower() in ['exit', 'quit']:
-            print("\nGoodbye! Thanks for using SQL Search Engine Chatbot.")
-            break
-            
-        if not input_prompt:
-            print("Please enter a question.")
-            continue
-            
-        try:
-            messages = app.invoke(
-                {"messages": [("user", input_prompt)]}
-            )
-            final_answer = messages["messages"][-1].tool_calls[0]["args"]["final_answer"]
-            print("\nAssistant:", final_answer)
-        except Exception as e:
-            print(f"\nError: {str(e)}")
-            print("Please try asking your question in a different way.")
-
-time.sleep(5)
-os.system(clear_command)
-if __name__ == "__main__":
-    run_chatbot()
-"""
-# Interfaz con Gradio
-""" Code base de ejemplo para Gradio
-def greet(name, intensity):
-    return "Hello, " + name + "!" * int(intensity)
-
-demo = gr.Interface(
-    fn=greet,
-    inputs=["text", "slider"],
-    outputs=["text"],
-)
-
-demo.launch()
-"""
-def agent_chat_response(message: str, history: list[list[str]]):
-    """
-    Función para el chatbot de Gradio. Mantiene el historial.
-    Nota: Este ejemplo simple invoca el agente *desde cero* con cada mensaje nuevo.
-          Para mantener el estado real de LangGraph entre turnos, se necesitaría
-          una gestión de estado más compleja (ej. almacenar/recuperar estados por sesión).
-    """
-    print(f"--- Chat Input: {message} ---")
-    print(f"--- History: {history} ---") # History es [[user_msg1, bot_msg1], [user_msg2, bot_msg2], ...]
-
-    try:
-        # Invocar el agente con el mensaje actual del usuario
-        config = {"recursion_limit": 50}
-        final_state = app.invoke(
-             {"messages": [HumanMessage(content=message)]},
-             config=config
-        )
-
-        # Extraer la respuesta final
-        final_answer = "No se pudo determinar la respuesta final."
-        last_message = final_state.get("messages", [])[-1]
-        if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-             for tc in last_message.tool_calls:
-                 if tc.get("name") == "SubmitFinalAnswer":
-                     final_answer = tc.get("args", {}).get("final_answer", final_answer)
-                     break
-
-        print(f"--- Chat Output: {final_answer} ---")
-        return final_answer
-
-    except Exception as e:
-        import traceback
-        print(f"\nError en Gradio invoke: {e}")
-        print(traceback.format_exc())
-        return f"Ocurrió un error: {str(e)}"
-
-# Crear la interfaz de Chatbot
-iface_chat = gr.ChatInterface(
-    fn=agent_chat_response,
-    chatbot=gr.Chatbot(height=400, type="messages"),
-    textbox=gr.Textbox(placeholder="Pregúntame algo sobre la base de datos AInsights...", container=False, scale=7),
-    title="🔮AInsights Intelligence",
-    description="Chatea con un agente que puede consultar la base de datos AInsights.",
-    examples=[
-        "¿Cual es el motivo de contacto del caso 298652749 de la tabla salida_claro_col?"
-    ]
-) 
-# -----------------------------------------------°
-# --- Lanzar la interfaz de Gradio en consola ---°
-# -----------------------------------------------°
-if __name__ == "__main__":
-    print("Lanzando interfaz AInsights Intelligence...")
-    iface_chat.launch(share=False)
