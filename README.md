@@ -17,6 +17,9 @@ La primera versión de este proyecto implementa un agente conversacional intelig
 *   **Manejo de Errores:** Incluye mecanismos para gestionar errores durante la ejecución de herramientas y la interacción con la base de datos.
 *   **Configuración Flexible:** Gestiona claves API y configuraciones de proyecto fácilmente mediante un archivo `.env`.
 
+## Seguimiento de tareas relacionadas a este proyecto
+*   **Trello:** ([dashboard](https://trello.com/b/hwrenatP/task-managment))
+
 ## Prerrequisitos
 
 *   Python 3.8 o superior
@@ -110,5 +113,3 @@ La primera versión de este proyecto implementa un agente conversacional intelig
 *   **Visualización de Errores Mejorada:** Mostrar errores de forma más amigable en la interfaz de usuario.
 *   **Contenerización (Docker):** Facilitar el despliegue.
 *   **Pruebas:** Añadir pruebas unitarias e de integración.
-
----
