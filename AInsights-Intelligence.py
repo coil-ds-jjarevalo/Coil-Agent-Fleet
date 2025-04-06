@@ -468,4 +468,4 @@ iface_chat = gr.ChatInterface(
 # -----------------------------------------------°
 if __name__ == "__main__":
     print("Lanzando interfaz AInsights Intelligence...")
-    iface_chat.launch(share=False)
+    iface_chat.launch(share=True)

@@ -24,6 +24,7 @@ from dotenv import load_dotenv
 from typing import Any
 from typing_extensions import TypedDict
 from typing import Annotated, Literal
+import gradio as gr
 # Langchain
 from langchain_core.messages import BaseMessage
 from langchain_core.runnables import RunnableConfig
@@ -35,10 +36,10 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import ToolMessage
 from langchain_core.runnables import RunnableWithFallbacks, RunnableLambda
 from langchain_core.messages import AIMessage
+from langchain_core.messages import HumanMessage
 # Langgraph
-from langgraph.graph import END, MessagesState, StateGraph, START
+from langgraph.graph import END, MessagesState, StateGraph, START, add_messages
 from langgraph.prebuilt import ToolNode
-from langgraph.graph import AnyMessage, add_messages
 # Pydantic AI
 from pydantic import BaseModel, Field
 # --------------------------°
@@ -67,40 +68,22 @@ os.system(clear_command)
 # --------------------------------°
 # --- Configurar Base de Datos ---°
 # --------------------------------°
-""" Base Chinook de prueba
-url = "https://storage.googleapis.com/benchmarks-artifacts/chinook/Chinook.db"
-
-response = requests.get(url)
-
-if response.status_code == 200:
-    # Open a local file in binary write mode
-    with open("Chinook.db", "wb") as file:
-        # Write the content of the response (the file) to the local file
-        file.write(response.content)
-    print("File downloaded and saved as Chinook.db")
-else:
-    print(f"Failed to download the file. Status code: {response.status_code}")
-
-
-db = SQLDatabase.from_uri("sqlite:///Chinook.db")
-"""
 bq_uri = f"bigquery://{google_project_id}/{bigquery_dataset}"
 print(f"Connectando a BigQuery: {bq_uri}")
-time.sleep(3)
+time.sleep(5)
 os.system(clear_command)
 
 try:
-    db = SQLDatabase.from_uri(bq_uri) # ¡Aquí está el cambio clave!
+    db = SQLDatabase.from_uri(bq_uri) #
 
-    print(f"Dialect: {db.dialect}") # Debería imprimir 'bigquery'
-    # time.sleep(1) # Opcional
-
+    print(f"Dialect: {db.dialect}") #
+    
     print("Fetching usable table names...")
     usable_tables = db.get_usable_table_names()
-    print(f"Usable tables: {usable_tables}/n")
-    # time.sleep(1) # Opcional
+    print(f"Usable tables: {usable_tables}\n")
+    # time.sleep(1) 
 
-    # Opcional: Probar una consulta simple si quieres verificar la conexión
+    # Probar una consulta simple para verificar la conexión
     # test_query = f"SELECT COUNT(*) FROM `{google_project_id}.{bigquery_dataset}.{usable_tables[0]}` LIMIT 1"
     # print(f"Running test query: {test_query}")
     # print(db.run(test_query))
@@ -108,16 +91,16 @@ try:
 except Exception as e:
     print(f"Error connecting to BigQuery or fetching tables: {e}")
     print("Please check your GOOGLE_PROJECT_ID, BIGQUERY_DATASET, and authentication setup (Application Default Credentials or GOOGLE_APPLICATION_CREDENTIALS).")
-    exit() # Salir si no se puede conectar
-
-# time.sleep(5)
-# os.system(clear_command)
-# db.run("SELECT * FROM Artist LIMIT 10;")
-# Conexión a Big Query
+    exit()
 # ---------------------------------°
 # --- Definir funciones (tools) ---°
 # ---------------------------------°
-toolkit = SQLDatabaseToolkit(db=db, llm=selected_model)
+# Create a proper LLM instance for the toolkit
+llm_for_toolkit = ChatVertexAI(
+    model=selected_model, location=LOCATION, temperature=0, max_tokens=1024
+)
+
+toolkit = SQLDatabaseToolkit(db=db, llm=llm_for_toolkit)
 tools = toolkit.get_tools()
 # 1) list_tables_tool: Fetch the available tables from the database
 list_tables_tool = next(tool for tool in tools if tool.name == "sql_db_list_tables")
@@ -176,7 +159,7 @@ query_check_prompt = ChatPromptTemplate.from_messages(
      ("placeholder", "{messages}")]
 )
 
-query_check = query_check_prompt | selected_model.bind_tools( 
+query_check = query_check_prompt | llm_for_toolkit.bind_tools( 
     [db_query_tool], tool_choice="db_query_tool"
 )
 
@@ -243,7 +226,7 @@ agent = workflow.compile()
 """
 # Define the state for the agent
 class State(TypedDict):
-    messages: Annotated[list[AnyMessage], add_messages]
+    messages: Annotated[list[BaseMessage], add_messages]
 
 # Define a new graph
 workflow = StateGraph(State)
@@ -280,7 +263,7 @@ workflow.add_node(
 workflow.add_node("get_schema_tool", create_tool_node_with_fallback([get_schema_tool]))
 
 # Add a node for a model to choose the relevant tables based on the question and available tables
-model_get_schema = selected_model.bind_tools(
+model_get_schema = llm_for_toolkit.bind_tools(
     [get_schema_tool]
 )
 workflow.add_node(
@@ -320,7 +303,7 @@ query_gen_prompt = ChatPromptTemplate.from_messages(
      ("placeholder", "{messages}")]
 )
 
-query_gen = query_gen_prompt | selected_model.bind_tools(
+query_gen = query_gen_prompt | llm_for_toolkit.bind_tools(
     [SubmitFinalAnswer] # SubmitFinalAnswer sigue siendo la herramienta para la respuesta final
 )
 
@@ -380,3 +363,59 @@ workflow.add_edge("execute_query", "query_gen")
 
 # Compile the workflow into a runnable
 app = workflow.compile()
+# -----------------------------------------------------------------------------°
+# --- Interfaz con Gradio (recurso mientras se habilita el proyecto en gcp) ---°
+# -----------------------------------------------------------------------------°
+def agent_chat_response(message: str, history: list[list[str]]):
+    """
+    Función para el chatbot de Gradio. Mantiene el historial.
+    Nota: Este ejemplo simple invoca el agente *desde cero* con cada mensaje nuevo.
+          Para mantener el estado real de LangGraph entre turnos, se necesitaría
+          una gestión de estado más compleja (ej. almacenar/recuperar estados por sesión).
+    """
+    print(f"--- Chat Input: {message} ---")
+    print(f"--- History: {history} ---") # History es [[user_msg1, bot_msg1], [user_msg2, bot_msg2], ...]
+    
+    try:
+        # Invocar el agente con el mensaje actual del usuario
+        config = {"recursion_limit": 50}
+        final_state = app.invoke(
+             {"messages": [HumanMessage(content=message)]},
+             config=config
+        )
+
+        # Extraer la respuesta final
+        final_answer = "No se pudo determinar la respuesta final."
+        last_message = final_state.get("messages", [])[-1]
+        if hasattr(last_message, "tool_calls") and last_message.tool_calls:
+             for tc in last_message.tool_calls:
+                 if tc.get("name") == "SubmitFinalAnswer":
+                     final_answer = tc.get("args", {}).get("final_answer", final_answer)
+                     break
+
+        print(f"--- Chat Output: {final_answer} ---")
+        return final_answer
+
+    except Exception as e:
+        import traceback
+        print(f"\nError en Gradio invoke: {e}")
+        print(traceback.format_exc())
+        return f"Ocurrió un error: {str(e)}"
+
+# Crear la interfaz de Chatbot
+iface_chat = gr.ChatInterface(
+    fn=agent_chat_response,
+    chatbot=gr.Chatbot(height=400, type="messages"),
+    textbox=gr.Textbox(placeholder="Pregúntame algo sobre la base de datos AInsights...", container=False, scale=7),
+    title="🔮 AInsights Intelligence",
+    description="Chatea con un agente que puede consultar la base de datos AInsights.",
+    examples=[
+        "¿Cual es el motivo de contacto del caso 298652749 de la tabla salida_claro_col?"
+    ]
+) 
+# -----------------------------------------------°
+# --- Lanzar la interfaz de Gradio en consola ---°
+# -----------------------------------------------°
+if __name__ == "__main__":
+    print("Lanzando interfaz AInsights Intelligence...")
+    iface_chat.launch(share=False)

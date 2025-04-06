@@ -11,7 +11,10 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-
+# ---------------------°
+# --- Importaciones ---°
+# ---------------------°
+# Genral
 import datetime
 import json
 import logging
@@ -20,14 +23,16 @@ from collections.abc import Iterable, Mapping, Sequence
 from typing import (
     Any,
 )
-
+# Google Cloud
 import google.auth
 import vertexai
 from google.cloud import logging as google_cloud_logging
-from langchain_core.runnables import RunnableConfig
-from traceloop.sdk import Instruments, Traceloop
 from vertexai import agent_engines
-
+# Langchain
+from langchain_core.runnables import RunnableConfig
+# Traceloop
+from traceloop.sdk import Instruments, Traceloop
+# App
 from app.utils.gcs import create_bucket_if_not_exists
 from app.utils.tracing import CloudTraceLoggingSpanExporter
 from app.utils.typing import Feedback, InputChat, dumpd, ensure_valid_config
